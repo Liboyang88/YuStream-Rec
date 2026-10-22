@@ -1,9 +1,14 @@
 package db
 
 import (
-	"dcpro/domain"
+	"fmt"
+	"litstream/domain"
+	"litstream/pkg/mylog"
+	"time"
+
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // type MySQLDB struct {
@@ -14,16 +19,39 @@ import (
 func InitMySQLDB(env *domain.Env, models ...any) *gorm.DB {
 	var err error
 
+	gormLogger := mylog.NewGormLogger(mylog.CtxGLKey{}, 200*time.Second, false, logger.Info)
+
 	db, err := gorm.Open(
 		mysql.Open(env.MysqlDsn),
-	 	&gorm.Config{})
+		&gorm.Config{
+			TranslateError: true,
+			PrepareStmt:    true,
+			Logger:         gormLogger,
+			// // 2. 关闭默认事务：GORM默认每条Create/Update/Delete自动开事务；业务自己控制事务，提升性能
+			// SkipDefaultTransaction: true,
+		})
 	if err != nil {
 		panic(err)
 	}
 
+	sqlDB, err := db.DB()
+	if err != nil {
+		panic(fmt.Errorf("get sqlDB failed: %w", err))
+	}
+	// 连接池参数，建议放到 env 环境变量，不要硬编码！
+	sqlDB.SetMaxIdleConns(env.MysqlMaxIdleConns)
+	sqlDB.SetMaxOpenConns(env.MysqlMaxOpenConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(env.MysqlConnMaxLifetime) * time.Minute)
+	sqlDB.SetConnMaxIdleTime(time.Duration(env.MysqlConnMaxIdleTime) * time.Minute)
+
+	// 4. 连通性校验
+	if err := sqlDB.Ping(); err != nil {
+		panic(fmt.Errorf("mysql ping failed: %w", err))
+	}
+
 	for _, model := range models {
 		if err := db.AutoMigrate(model); err != nil {
-			panic(err)
+			panic(fmt.Errorf("auto migrate failed: %w", err))
 		}
 	}
 	return db

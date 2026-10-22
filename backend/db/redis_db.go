@@ -2,7 +2,7 @@ package db
 
 import (
 	"context"
-	"dcpro/domain"
+	"litstream/domain"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -13,10 +13,10 @@ import (
 
 func InitRedisDB(env *domain.Env) *redis.Client {
 	rdb := redis.NewClient(&redis.Options{
-			Addr:     env.RedisAddress,
-			Password: env.RedisPassword,
-			DB:       env.RedisDB,
-		})
+		Addr:     env.RedisAddress,
+		Password: env.RedisPassword,
+		DB:       env.RedisDB,
+	})
 	if _, err := rdb.Ping(context.Background()).Result(); err != nil {
 		panic(err)
 	}

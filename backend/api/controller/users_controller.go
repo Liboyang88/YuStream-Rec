@@ -1,264 +1,208 @@
 package controller
 
 import (
-	// 自定义包
-	"dcpro/domain"
-	"dcpro/internal/tokenutil"
-	"dcpro/pkg"
-	"dcpro/repository"
-
-	// 官方或第三方包
 	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/bcrypt"
+
+	"litstream/domain"
+	"litstream/internal/service"
+	"litstream/internal/util/tokenutil"
+	"litstream/pkg"
 )
 
 type UsersController struct {
-	user_repo *repository.UserRepository
-	AccessTokenSecret string
-	AccessTokenExpire int
+	users              *service.UserService
+	AccessTokenSecret  string
+	AccessTokenExpire  int
 	RefreshTokenSecret string
 	RefreshTokenExpire int
 }
 
 func NewUsersController(
-	user_repo *repository.UserRepository,
-	accessTokenSecret string,accessTokenExpire int,
-	refreshTokenSecret string,refreshTokenExpire int) *UsersController {
+	users *service.UserService,
+	accessTokenSecret string, accessTokenExpire int,
+	refreshTokenSecret string, refreshTokenExpire int) *UsersController {
 	return &UsersController{
-		user_repo: user_repo,
-		AccessTokenSecret: accessTokenSecret,
-		AccessTokenExpire: accessTokenExpire,
+		users:              users,
+		AccessTokenSecret:  accessTokenSecret,
+		AccessTokenExpire:  accessTokenExpire,
 		RefreshTokenSecret: refreshTokenSecret,
 		RefreshTokenExpire: refreshTokenExpire,
 	}
 }
 
-func (uc *UsersController) SignUp(c *gin.Context){
+func (uc *UsersController) SendEmailForSignUp(c *gin.Context) {
+	var req domain.SendEmailForSignUpRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(pkg.CodeBadRequest, gin.H{"kind": "http request", "msg": pkg.FormatValidationErr(err)})
+		return
+	}
+	myErr := uc.users.SendVerifyMail(c, req.Email, true)
+	c.JSON(myErr.Code, myErr.ToGin())
+}
+
+func (uc *UsersController) SendEmailForForgetPassword(c *gin.Context) {
+	var req domain.SendEmailForForgetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(pkg.CodeBadRequest, gin.H{"kind": "http request", "msg": pkg.FormatValidationErr(err)})
+		return
+	}
+	myErr := uc.users.CheckEmailExists(c, req.Email)
+	if myErr.Code >= 400 {
+		c.JSON(myErr.Code, myErr.ToGin())
+		return
+	}
+	myErr = uc.users.SendVerifyMail(c, req.Email, false)
+	c.JSON(myErr.Code, myErr.ToGin())
+}
+
+func (uc *UsersController) SignUp(c *gin.Context) {
 	var req domain.SignUpRequest
-	// 创建空对象
-	user := &domain.User{}
-
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{
-			"error": pkg.FormatValidationErr(err),
-		})
+		c.JSON(pkg.CodeBadRequest, gin.H{"kind": "http request", "msg": pkg.FormatValidationErr(err)})
 		return
 	}
 
-	// 判断用户名是否存在
-	if isExist, err := uc.user_repo.IsNameExist(c, req.Username); err != nil {
-		c.JSON(500, domain.ErrorResponse(err.Error()))
-		return
-	}else if isExist{
-		c.JSON(400, domain.ErrorResponse("Username already exists"))
+	user, myErr := uc.users.Register(c, req.Email, req.Username, req.Password, req.Code)
+	if myErr.Code >= 400 {
+		c.JSON(myErr.Code, myErr.ToGin())
 		return
 	}
-
-	if err := uc.user_repo.AddNewUserByReq(c, user, &req); err != nil {
-		c.JSON(500, domain.ErrorResponse(err.Error()))
+	// TODO: 这一步出错 但是用户已经创建了，这样再点击创建用户会冲突报错，需要处理
+	accessToken, err := tokenutil.CreateAccessToken(user, uc.AccessTokenSecret, uc.AccessTokenExpire)
+	if err != nil {
+		c.JSON(pkg.CodeInternalServerError, gin.H{"kind": "http request", "msg": "Create accessToken failed"})
 		return
-	}else{
-		accessToken, err := tokenutil.CreateAccessToken(user, uc.AccessTokenSecret, uc.AccessTokenExpire)
-		if err != nil {
-			c.JSON(500, domain.ErrorResponse(err.Error()))
-			return
-		}
-		refreshToken, err := tokenutil.CreateRefreshToken(user, uc.RefreshTokenSecret, uc.RefreshTokenExpire)
-		if err != nil {
-			c.JSON(500, domain.ErrorResponse(err.Error()))
-			return
-		}
-		c.JSON(200, domain.LoginOrSignUpResponse{
-			AccessToken:  accessToken,
-			RefreshToken: refreshToken,
-		})
 	}
+	refreshToken, err := tokenutil.CreateRefreshToken(user, uc.RefreshTokenSecret, uc.RefreshTokenExpire)
+	if err != nil {
+		c.JSON(pkg.CodeInternalServerError, gin.H{"kind": "http request", "msg": "Create refreshToken failed"})
+		return
+	}
+	c.JSON(pkg.CodeCreated, domain.LoginOrSignUpResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	})
 }
 
-func (uc *UsersController) Login(c *gin.Context){
+func (uc *UsersController) ForgetPassword(c *gin.Context) {
+	var req domain.ForgetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(pkg.CodeBadRequest, gin.H{"kind": "http request", "msg": pkg.FormatValidationErr(err)})
+		return
+	}
+
+	myErr := uc.users.ForgetPassword(c, req.Email, req.Code, req.Password)
+	c.JSON(myErr.Code, myErr.ToGin())
+}
+
+func (uc *UsersController) Login(c *gin.Context) {
 	var req domain.LoginRequest
-	user := &domain.User{}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{
-			"error": pkg.FormatValidationErr(err),
-		})
+		c.JSON(pkg.CodeBadRequest, gin.H{"kind": "http request", "msg": pkg.FormatValidationErr(err)})
 		return
 	}
 
-	if err := uc.user_repo.FindUserByName(c, user, req.Username); err != nil {
-		c.JSON(400, domain.ErrorResponse(err.Error()))
-		return
-	}else if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil{
-		c.JSON(500, domain.ErrorResponse("Username or Password is incorrect"))
-		return
-	}else{
-		if err := uc.user_repo.ExtendUnameExpire(c, req.Username); err != nil {
-			c.JSON(400, domain.ErrorResponse(err.Error()))
-			return
-		}
-		accessToken, err := tokenutil.CreateAccessToken(user, uc.AccessTokenSecret, uc.AccessTokenExpire)
-		if err != nil {
-			c.JSON(500, domain.ErrorResponse(err.Error()))
-			return
-		}
-		refreshToken, err := tokenutil.CreateRefreshToken(user, uc.RefreshTokenSecret, uc.RefreshTokenExpire)
-		if err != nil {
-			c.JSON(500, domain.ErrorResponse(err.Error()))
-			return
-		}
-		c.JSON(200, domain.LoginOrSignUpResponse{
-			AccessToken:  accessToken,
-			RefreshToken: refreshToken,
-		})
+	user, myErr := uc.users.Authenticate(c, req.Email, req.Password)
+	if myErr.Code >= 400 {
+		c.JSON(myErr.Code, myErr.ToGin())
 		return
 	}
-}
-
-func (uc *UsersController) GetProfile(c *gin.Context){
-	var resp domain.ShowProfileResponse
-
-	userID, ok := c.Get("x-user-id")
-	uid, ok := userID.(uint)
-	if !ok {
-		c.JSON(400, domain.ErrorResponse("User ID not found"))
-		return
-	}
-	user := &domain.User{}
-	if err := uc.user_repo.FindUserByID(c, user, uid); err != nil {
-		c.JSON(500, domain.ErrorResponse(err.Error()))
-		return
-	}else{
-		if user.ID == 0{
-			c.JSON(400, domain.ErrorResponse("User not found"))
-			return
-		}
-		resp = domain.BuildShowProfileResponse(user)
-		c.JSON(200, resp)
-		return
-	}
-}
-func (uc *UsersController) UpdateSummary(c *gin.Context){
-	userID, ok := c.Get("x-user-id")
-	uid, ok := userID.(uint)
-	if !ok {
-		c.JSON(400, domain.ErrorResponse("User ID not found"))
-		return
-	}
-
-	err := uc.user_repo.UpdateUserSummary(c, uid)
-	
+	accessToken, err := tokenutil.CreateAccessToken(user, uc.AccessTokenSecret, uc.AccessTokenExpire)
 	if err != nil {
-		c.JSON(500, gin.H{"msg": "提交任务失败"})
+		c.JSON(pkg.CodeInternalServerError, gin.H{"kind": "http request", "msg": "Create accessToken failed"})
 		return
 	}
-
-	c.JSON(200, gin.H{
-		"msg":    "任务已提交",
-		// "taskID": info.ID,
+	refreshToken, err := tokenutil.CreateRefreshToken(user, uc.RefreshTokenSecret, uc.RefreshTokenExpire)
+	if err != nil {
+		c.JSON(pkg.CodeInternalServerError, gin.H{"kind": "http request", "msg": "Create refreshToken failed"})
+		return
+	}
+	c.JSON(pkg.CodeGetSuccess, domain.LoginOrSignUpResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 	})
 }
 
-func (uc *UsersController) GenerateSummary(c *gin.Context){
-	userID, ok := c.Get("x-user-id")
-	uid, ok := userID.(uint)
+func (uc *UsersController) GetProfile(c *gin.Context) {
+	uid, ok := getUserID(c)
 	if !ok {
-		c.JSON(400, domain.ErrorResponse("User ID not found"))
+		c.JSON(pkg.CodeUnauthorized, gin.H{"msg": "User ID not found"})
 		return
 	}
 
-	err := uc.user_repo.GenerateUserSummary(c, uid)
-	
-	if err != nil {
-		c.JSON(500, gin.H{"msg": "提交任务失败"})
+	user, myErr := uc.users.GetProfile(c, uid)
+	if myErr.Code >= 400 {
+		c.JSON(myErr.Code, myErr.ToGin())
 		return
 	}
-
-	c.JSON(200, gin.H{
-		"msg":    "任务已提交",
-		// "taskID": info.ID,
-	})
+	c.JSON(myErr.Code, domain.BuildShowProfileResponse(user))
 }
 
-func (uc *UsersController) UpdateInfo(c *gin.Context){
+// UpdateSummary 手动触发"画像增量更新"：投递任务后立即返回。
+func (uc *UsersController) UpdateSummary(c *gin.Context) {
+	uid, ok := getUserID(c)
+	if !ok {
+		c.JSON(pkg.CodeUnauthorized, gin.H{"msg": "User ID not found"})
+		return
+	}
+
+	myErr := uc.users.EnqueueIncrementalProfileUpdate(c, uid)
+	c.JSON(myErr.Code, myErr.ToGin())
+}
+
+// GenerateSummary 手动触发"画像重新生成"：投递任务后立即返回。
+func (uc *UsersController) GenerateSummary(c *gin.Context) {
+	uid, ok := getUserID(c)
+	if !ok {
+		c.JSON(pkg.CodeUnauthorized, gin.H{"msg": "User ID not found"})
+		return
+	}
+
+	myErr := uc.users.EnqueueProfileRegeneration(c, uid)
+	c.JSON(myErr.Code, myErr.ToGin())
+}
+
+// UpdateInfo 改资料：整笔同步完成后才返回"更新成功"。
+func (uc *UsersController) UpdateInfo(c *gin.Context) {
 	var req domain.InfoRequest
-	userID, ok := c.Get("x-user-id")
-	uid, ok := userID.(uint)
+	uid, ok := getUserID(c)
 	if !ok {
-		c.JSON(400, domain.ErrorResponse("User ID not found"))
+		c.JSON(pkg.CodeUnauthorized, gin.H{"msg": "User ID not found"})
 		return
 	}
+	// 校验请求体
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{
-			"error": pkg.FormatValidationErr(err),
-		})
+		c.JSON(pkg.CodeBadRequest, gin.H{"msg": pkg.FormatValidationErr(err)})
 		return
 	}
-	updateMap := switch_info_map(req)
-	if len(updateMap) == 0 {
-		c.JSON(400, gin.H{"msg": "至少提交一个更改字段"})
-		return
-	}
-	err := uc.user_repo.UpdateUserInfo(c, uid, updateMap)
-	if err != nil {
-		c.JSON(500, gin.H{"msg": "提交任务失败"})
-		return
-	}
-	c.JSON(200, gin.H{
-		"msg":    "任务已提交",
-	})
+
+	myErr := uc.users.UpdateProfile(c, uid, &req)
+	c.JSON(myErr.Code, myErr.ToGin())
 }
 
-// func (uc *UsersController) FillInfo(c *gin.Context){
-// 	var req domain.InfoRequest
-// 	userID, ok := c.Get("x-user-id")
-// 	uid, ok := userID.(uint)
-// 	if !ok {
-// 		c.JSON(400, domain.ErrorResponse("User ID not found"))
-// 		return
-// 	}
-// 	if err := c.ShouldBindJSON(&req); err != nil {
-// 		c.JSON(400, gin.H{
-// 			"error": pkg.FormatValidationErr(err),
-// 		})
-// 		return
-// 	}
-// 	updateMap := switch_info_map(req)
-// 	if len(updateMap) == 0 {
-// 		c.JSON(400, gin.H{"msg": "至少提交一个更改字段"})
-// 		return
-// 	}
-// 	err := uc.user_repo.FillUserInfo(c, uid, updateMap)
-// 	if err != nil {
-// 		c.JSON(500, gin.H{"msg": "提交任务失败"})
-// 		return
-// 	}
-// 	c.JSON(200, gin.H{
-// 		"msg":    "任务已提交",
-// 	})
-// }
+func (uc *UsersController) FillInfo(c *gin.Context) {
+	var req domain.InfoRequest
+	uid, ok := getUserID(c)
+	if !ok {
+		c.JSON(pkg.CodeUnauthorized, gin.H{"msg": "User ID not found"})
+		return
+	}
+	// 校验请求体
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(pkg.CodeBadRequest, gin.H{"msg": pkg.FormatValidationErr(err)})
+		return
+	}
 
-func switch_info_map(req domain.InfoRequest) map[string]interface{}{
-	updateMap := make(map[string]interface{})
-	if req.Age != nil {
-		updateMap["age"] = *req.Age
+	myErr := uc.users.FillProfile(c, uid, &req)
+	c.JSON(myErr.Code, myErr.ToGin())
+}
+
+// getUserID 从 JWT 中间件注入的上下文取出用户 ID。
+func getUserID(c *gin.Context) (uint, bool) {
+	raw, ok := c.Get("x-user-id")
+	if !ok {
+		return 0, false
 	}
-	if req.Gender != nil {
-		updateMap["gender"] = *req.Gender
-	}
-	if req.Job != nil {
-		updateMap["job"] = *req.Job
-	}
-	if req.Education != nil {
-		updateMap["education"] = *req.Education
-	}
-	if req.Location != nil {
-		updateMap["location"] = *req.Location
-	}
-	if req.Organization != nil {
-		updateMap["organization"] = *req.Organization
-	}
-	if req.InterestingFields != nil {
-		updateMap["interesting_fields"] = *req.InterestingFields
-	}
-	return updateMap
+	uid, ok := raw.(uint)
+	return uid, ok
 }

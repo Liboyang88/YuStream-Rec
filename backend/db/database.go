@@ -2,37 +2,37 @@ package db
 
 import (
 	"errors"
-
-	"dcpro/domain"
+	"litstream/domain"
 
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )
 
 type AllDatabases struct {
-	SQLDB *gorm.DB
+	SQLDB   *gorm.DB
 	RedisDB *redis.Client
-	WQ *asynq.Client
-	Milvus *MilvusDB
+	WQ      *asynq.Client
+	Milvus  *MilvusDB
 }
 
-func (a *AllDatabases) Init(env *domain.Env) error {
+func (a *AllDatabases) Init(env *domain.Env, logger *zerolog.Logger) error {
 
 	var err error
 
 	a.SQLDB = InitMySQLDB(env, &domain.User{}, &domain.Item{})
-	println("mysql数据库注册成功")
+	logger.Info().Msg("mysql数据库注册成功")
 	a.RedisDB = InitRedisDB(env)
-	println("redis数据库注册成功")
-	a.WQ = InitAsyncq(env)
-	println("asyncq数据库注册成功")
+	logger.Info().Msg("redis数据库注册成功")
+	a.WQ = InitAsynq(env)
+	logger.Info().Msg("asynq数据库注册成功")
 	a.Milvus, err = InitMilvus(env)
-	println("milvus数据库注册成功")
 	if err != nil {
 		panic(err)
 	}
-	println("数据库注册成功")
+	logger.Info().Msg("milvus数据库注册成功")
+	logger.Info().Msg("数据库注册成功")
 	return nil
 }
 

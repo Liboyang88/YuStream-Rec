@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"dcpro/bootstrap"
+	"litstream/bootstrap"
 )
 
 func main() {

@@ -1,9 +1,10 @@
 package bootstrap
 
 import (
+	"litstream/domain"
 	"log"
+
 	"github.com/spf13/viper"
-	"dcpro/domain"
 )
 
 func NewEnv() *domain.Env {

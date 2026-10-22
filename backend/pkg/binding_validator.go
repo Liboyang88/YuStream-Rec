@@ -6,18 +6,27 @@ import (
 	"regexp"
 )
 
-var pwdReg = regexp.MustCompile(`^[a-zA-Z0-9]{8,20}$`)
+var pwdRegex = regexp.MustCompile(`^[a-zA-Z0-9]{8,20}$`)
 var unRegex = regexp.MustCompile(`^[^\s]{2,15}$`)
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+var verCodeRegex = regexp.MustCompile(`^[0-9]{6}$`)
 
 // 自定义校验函数
 func validateUserPassword(fl validator.FieldLevel) bool {
-	return pwdReg.MatchString(fl.Field().String())
+	return pwdRegex.MatchString(fl.Field().String())
 }
 
 func validateUserUsername(fl validator.FieldLevel) bool {
 	return unRegex.MatchString(fl.Field().String())
 }
 
+func validateEmail(fl validator.FieldLevel) bool {
+	return emailRegex.MatchString(fl.Field().String())
+}
+
+func validateVerCode(fl validator.FieldLevel) bool {
+	return verCodeRegex.MatchString(fl.Field().String())
+}
 
 func FormatValidationErr(err error) map[string]string {
 	errs, ok := err.(validator.ValidationErrors)
@@ -32,6 +41,10 @@ func FormatValidationErr(err error) map[string]string {
 			res[field] = "格式错误：必须8-20位字母/数字组合"
 		} else if e.Tag() == "userun" {
 			res[field] = "格式错误：必须2-15长度的字母/数字/中文/特殊字符组合"
+		} else if e.Tag() == "vercode" {
+			res[field] = "验证码格式错误"
+		} else if e.Tag() == "email" {
+			res[field] = "邮箱格式错误"
 		} else if e.Tag() == "required" {
 			res[field] = "该字段不能为空"
 		}
@@ -45,5 +58,7 @@ func InitUserValidator() {
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
 		_ = v.RegisterValidation("userpwd", validateUserPassword)
 		_ = v.RegisterValidation("userun", validateUserUsername)
+		_ = v.RegisterValidation("email", validateEmail)
+		_ = v.RegisterValidation("vercode", validateVerCode)
 	}
 }

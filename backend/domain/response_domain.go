@@ -1,16 +1,16 @@
 package domain
 
 import (
-	"github.com/gin-gonic/gin"
+	// "github.com/gin-gonic/gin"
 )
 
-func ErrorResponse(message string) gin.H {
-	return gin.H{"error": message}
-}
+// func ErrorResponse(message string) gin.H {
+// 	return gin.H{"error": message}
+// }
 
-func SuccessResponse(message string) gin.H {
-	return gin.H{"code": 0, "message": message}
-}
+// func SuccessResponse(message string) gin.H {
+// 	return gin.H{"code": 0, "message": message}
+// }
 
 type LoginOrSignUpResponse struct {
 	AccessToken  string `json:"accessToken"`

@@ -13,7 +13,8 @@ type User struct {
 	UpdatedAt time.Time `json:"-"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	Username string `gorm:"column:username;size:15;uniqueIndex;not null" json:"username"`
+	Username string `gorm:"column:username;size:15;not null" json:"username"`
+	Email    string `gorm:"column:email;size:50;uniqueIndex;not null" json:"email"`
 	Password string `gorm:"column:password;size:60;not null" json:"-"`
 	Age      int    `gorm:"column:age" json:"age"`
 	Gender   string `gorm:"column:gender;size:10" json:"gender"`
@@ -23,16 +24,18 @@ type User struct {
 	Organization string `gorm:"column:organization;size:20" json:"organization"`
 	InterestingFields []string `gorm:"column:interesting_fields;type:json;serializer:json" json:"interesting_fields"`
 	Summary string `gorm:"column:summary;type:text" json:"-"`
+	Topics string `gorm:"column:topics;type:text" json:"-"`
 }
 
 type Item struct {
 	ID        uint           `gorm:"primarykey" json:"id"`
-	CreatedAt time.Time      `json:"-"`
+	CreatedAt time.Time      `json:"-"` 
 	UpdatedAt time.Time      `json:"-"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	Title           string   `gorm:"column:title;" json:"title"`
 	WebSource       string   `gorm:"column:web_source;" json:"web_source"`
+	Url             string   `gorm:"column:url;" json:"url"`
 	PublishDate     string   `gorm:"column:publish_date;" json:"publish_date"`
 	Authors         []string `gorm:"column:authors;type:json;serializer:json" json:"authors"`
 	Abstract        string   `gorm:"column:abstract;type:text" json:"abstract"`
@@ -54,9 +57,9 @@ const(
 
 type Interaction struct{
     Type InteractionType `json:"type"`
-    Target Item `json:"target"`
-    Detail string `json:"detail"`
-    LongTS int64 `json:"long_ts"`
+    Target Item `json:"target" binding:"required"`
+    Detail string `json:"detail" binding:"omitempty,min=1,max=300"`
+    LongTS int64 `json:"long_ts" binding:"omitempty"`
 }
 
 func UserToHash(user *User) (map[string]string, error) {
@@ -72,6 +75,7 @@ func UserToHash(user *User) (map[string]string, error) {
     hash["location"] = user.Location
     hash["organization"] = user.Organization
     hash["summary"] = user.Summary
+	hash["topics"] = user.Topics
 
 	if user.InterestingFields == nil {
 		user.InterestingFields = []string{}
@@ -113,6 +117,7 @@ func HashToUser(hash map[string]string, user *User) error {
 	user.Location = hash["location"]
 	user.Organization = hash["organization"]
 	user.Summary = hash["summary"]
+	user.Topics = hash["topics"]
 
 	// JSON字符串反序列化为 []string
 	if hash["interesting_fields"] == "" {

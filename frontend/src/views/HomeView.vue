@@ -1,126 +1,119 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { getRecommend, addInteraction } from '../api'
-import { useItemsStore } from '../stores/items'
-import Sidebar from '../components/Sidebar.vue'
-import ItemCard from '../components/ItemCard.vue'
-import ProfileDrawer from '../components/ProfileDrawer.vue'
+import { onActivated, ref } from 'vue'
+import FeedStream from '@/components/FeedStream.vue'
+import SettingSwitch from '@/components/SettingSwitch.vue'
+import { usePreferencesStore } from '@/stores/preferences'
+import { useSmoothWheel } from '@/composables/useSmoothWheel'
 
-const router = useRouter()
-const itemsStore = useItemsStore()
+/**
+ * 首页（流式推荐）—— 只负责主页面布局中的「中间内容区」。
+ * 登录/注册与信息填写已拆分为独立页面（/auth、/welcome），
+ * 因此这里不再承载引导流程。
+ */
+const prefs = usePreferencesStore()
 
-const items = ref([])
-const loading = ref(false)
-const error = ref('')
-const showProfile = ref(false)
+const scrollerRef = ref(null)
 
-async function loadRecommend() {
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await getRecommend()
-    items.value = res.items || []
-    itemsStore.setItems(items.value)
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    loading.value = false
-  }
-}
+// 中心区域用鼠标滚轮平滑滚动（小红书式手感）
+useSmoothWheel(scrollerRef)
 
-function openItem(item) {
-  // 记录 click 交互（失败不阻塞跳转）
-  addInteraction({ type: 'click', target: item, detail: '点击卡片', long_ts: 0 }).catch(() => {})
-  router.push(`/item/${item.id}`)
-}
-
-function likeItem(item) {
-  addInteraction({ type: 'like', target: item, detail: '主页点赞', long_ts: 0 }).catch(() => {})
-}
-
-onMounted(loadRecommend)
+// 从其它页面返回首页时回到顶部，避免沿用上次的位置
+onActivated(() => {
+  if (scrollerRef.value) scrollerRef.value.scrollTop = 0
+})
 </script>
 
 <template>
-  <div class="home">
-    <Sidebar @refresh="loadRecommend" @profile="showProfile = true" />
+  <main class="content">
+    <div ref="scrollerRef" class="scroller" data-feed-scroll>
+      <div class="scroller-inner">
+        <header class="page-head">
+          <div class="head-main">
+            <h1 class="page-title">为你推荐</h1>
+            <p class="page-sub">根据你的用户画像实时生成，滚动到底部会自动加载更多。</p>
+          </div>
 
-    <main class="feed">
-      <header class="feed-head">
-        <div>
-          <h2>为你推荐</h2>
-          <p class="sub">基于你的学术画像，为你精选文献</p>
-        </div>
-        <button class="primary refresh" :disabled="loading" @click="loadRecommend">
-          {{ loading ? '加载中…' : '换一批' }}
-        </button>
-      </header>
+          <!-- 原先的「N 条推荐 / 推荐来源」chip 已移除，此处改为「中文翻译」开关 -->
+          <div class="head-meta">
+            <SettingSwitch
+              v-model="prefs.translateChinese"
+              label="中文翻译"
+              hint="卡片标题与摘要切换为中文"
+            />
+          </div>
+        </header>
 
-      <p v-if="error" class="error">{{ error }}</p>
-
-      <div v-if="items.length" class="grid">
-        <ItemCard
-          v-for="item in items"
-          :key="item.id"
-          :item="item"
-          @open="openItem"
-          @like="likeItem"
-        />
+        <FeedStream />
       </div>
-
-      <div v-else-if="!loading" class="empty">
-        <p>暂无推荐内容</p>
-        <p class="hint">先在「我的信息」里完善资料并生成画像，再来获取推荐</p>
-      </div>
-    </main>
-
-    <ProfileDrawer v-if="showProfile" @close="showProfile = false" />
-  </div>
+    </div>
+  </main>
 </template>
 
 <style scoped>
-.home {
-  display: flex;
-  min-height: 100vh;
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100vh;
+  position: relative;
 }
-.feed {
-  flex: 1;
-  padding: 28px 32px;
-  max-width: 1200px;
+
+.scroller {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
-.feed-head {
+
+.scroller-inner {
+  min-height: 100%;
+  padding: var(--feed-pad-y) var(--feed-pad-x) 48px;
   display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
+  gap: 18px;
+  flex-wrap: wrap;
+  max-width: 1120px;
+  width: 100%;
+  margin: 0 auto;
 }
-.feed-head h2 {
-  margin: 0;
-  font-size: 24px;
+.page-title {
+  font-size: 25px;
+  font-weight: 760;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
 }
-.feed-head .sub {
-  margin: 4px 0 0;
+.page-sub {
+  margin-top: 5px;
+  font-size: 13.5px;
   color: var(--text-2);
-  font-size: 13px;
+  line-height: 1.6;
 }
-.refresh {
-  width: auto;
-  padding: 9px 20px;
-  font-size: 14px;
+.head-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 4px;
 }
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
+
+@media (max-width: 900px) {
+  .scroller-inner {
+    padding: 22px 20px 40px;
+  }
+  .page-title {
+    font-size: 21px;
+  }
 }
-.empty {
-  text-align: center;
-  color: var(--text-2);
-  padding: 80px 0;
-}
-.empty .hint {
-  font-size: 13px;
-  color: var(--text-3);
+
+@media (max-width: 620px) {
+  .scroller-inner {
+    padding: 18px 14px 36px;
+  }
 }
 </style>

@@ -1,0 +1,168 @@
+name: litstream
+
+services:
+  # ---------------- 数据层 ----------------
+  mysql:
+    container_name: litstream-mysql
+    image: mysql:8.0
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password   # 兼容老驱动
+      - --init-connect=SET NAMES utf8mb4
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: litstream                    # 关键：AutoMigrate 不会建库
+      MYSQL_USER: new_user
+      MYSQL_PASSWORD: "123456"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
+  redis:                                     # 你清单里漏了，但 asynq/缓存/限流全靠它
+    container_name: litstream-redis
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]   # AOF 持久化，队列任务不丢
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------------- Milvus 三件套 ----------------
+  etcd:
+    container_name: milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.18
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  minio:
+    container_name: milvus-minio
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9001:9001"
+      - "9000:9000"
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  milvus:
+    container_name: milvus-standalone
+    image: milvusdb/milvus:v2.5.8
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+    - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      - "etcd"
+      - "minio"
+    restart: unless-stopped
+
+  # ---------------- 应用层 ----------------
+  backend:
+    container_name: litstream-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080" # 只监听宿主机本地，禁止外部直接访问，由frp代理进来
+    environment:
+      # 只用来覆盖 .env 里的地址（前提：见下面的说明）
+      TZ: Asia/Shanghai
+    volumes:
+      # 用挂载而不是 COPY 进镜像：改配置不用重新 build，密钥也不进镜像层
+      - ./.env:/app/.env:ro
+      - backend_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "--timeout=2", "http://127.0.0.1:8080/hello"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      mysql:  { condition: service_healthy }
+      redis:  { condition: service_healthy }
+      milvus: { condition: service_healthy }
+    restart: unless-stopped          # 崩了就重启，天然覆盖 Milvus 抖动
+
+  # # ---------------- 接入层 ----------------
+  # nginx:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+  #   depends_on:
+  #     - backend
+  #   restart: unless-stopped
+
+  # ---------------- 离线数据生产（一次性任务，默认不启动） ----------------
+  searcher:
+    container_name: litstream-searcher
+    build:
+      context: ./searcher
+      dockerfile: Dockerfile
+    profiles: ["tools"]          # ★ 关键：docker compose up 不会启动它
+    volumes:
+      # ★ 用 /app/.env 这个绝对路径，因为 searcher 默认找的是 ../backend/.env，
+      #   容器里没有 backend 目录，所以必须显式传 -config
+      - ./.env:/app/.env:ro
+      # 顺手挂一下 backend 源码，方便本地调试；生产可删
+      # - ./backend/.env:/config/.env:ro
+    depends_on:
+      mysql:  { condition: service_healthy }
+      milvus: { condition: service_healthy }
+    restart: "no"                # ★ 任务容器，跑完就结束，绝不能 unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+  backend_logs:

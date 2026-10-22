@@ -1,17 +1,39 @@
 package domain
 
 type LoginRequest struct {
-	Username string `json:"username" binding:"required,userun"`
+	Email string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,userpwd"`
 }
 
-type SignUpRequest struct {
+type SendEmailForSignUpRequest struct {
 	Username string `json:"username" binding:"required,userun"`
+	Email string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,userpwd"`
 	RepeatPassword string `json:"repassword" binding:"required,eqfield=Password"`
 }
 
+type SendEmailForForgetPasswordRequest struct {
+	Email string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,userpwd"`
+	RepeatPassword string `json:"repassword" binding:"required,eqfield=Password"`
+}
+
+type SignUpRequest struct {
+	Username string `json:"username" binding:"required,userun"`
+	Email string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,userpwd"`
+	Code string `json:"code" binding:"required,vercode"`
+}
+
+type ForgetPasswordRequest struct {
+	Email string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,userpwd"`
+	RepeatPassword string `json:"repassword" binding:"required,eqfield=Password"`
+	Code string `json:"code" binding:"required,vercode"`
+}
+
 type UpdateInfoRequest struct {
+	Username string `json:"username" binding:"required,userun"`
 	Age int `json:"age"`
 	Gender string `json:"gender"`
 	Job string `json:"job"`

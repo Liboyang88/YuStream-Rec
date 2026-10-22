@@ -1,36 +1,36 @@
 package controller
 
 import (
-	"dcpro/domain"
-	"dcpro/repository"
-	"net/http"
+	"litstream/domain"
+	"litstream/internal/service"
+	"litstream/pkg"
+
 	"github.com/gin-gonic/gin"
 )
 
 type InteractionsController struct {
-	// env  *domain.Env
-	interaction_repo *repository.InteractionRepository
+	interactions *service.InteractionService
 }
 
-func NewIaController(interaction_repo *repository.InteractionRepository) *InteractionsController {
-	return &InteractionsController{interaction_repo: interaction_repo, }
+func NewIaController(interactions *service.InteractionService) *InteractionsController {
+	return &InteractionsController{interactions: interactions}
 }
 
+// AddNewInteraction 记录互动：同步写入后返回成功，入队/写失败不再被吞掉。
 func (iac *InteractionsController) AddNewInteraction(c *gin.Context) {
-	var interaction domain.Interaction
-	userID, ok := c.Get("x-user-id")
+	uid, ok := getUserID(c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "x-user-id is required"})
+		c.JSON(pkg.CodeUnauthorized, gin.H{"kind": "http request", "msg": "Not authorized"})
 		return
 	}
 
+	var interaction domain.Interaction
 	if err := c.ShouldBindJSON(&interaction); err != nil {
-		c.JSON(400, gin.H{
-			"error": "the request of interaction is error",
-		})
+		c.JSON(pkg.CodeBadRequest, gin.H{"kind": "http request", "msg": "Invalid request body"})
 		return
 	}
 
-	iac.interaction_repo.AddNewInteraction(c, interaction, userID.(uint))
-	c.JSON(http.StatusOK, gin.H{"message": "add new interaction success"})
+	result := iac.interactions.RecordInteraction(c, uid, interaction)
+
+	c.JSON(result.Code, result.ToGin())
 }

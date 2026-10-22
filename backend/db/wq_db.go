@@ -1,16 +1,15 @@
 package db
 
 import (
-	"dcpro/domain"
+	"litstream/domain"
 
 	"github.com/hibiken/asynq"
 )
 
-
-func InitAsyncq(env *domain.Env) *asynq.Client {
+func InitAsynq(env *domain.Env) *asynq.Client {
 	redisOpt := asynq.RedisClientOpt{
-		Addr: env.RedisAddress,
-		 Password: env.RedisPassword, DB: env.RedisDB,
+		Addr:     env.RedisAddress,
+		Password: env.RedisPassword, DB: env.RedisDB,
 	}
 
 	client := asynq.NewClient(redisOpt)

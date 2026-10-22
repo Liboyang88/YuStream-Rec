@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,7 +46,24 @@ type ThinkingConfig struct {
 type ToolFunction struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Parameters  any    `json:"parameters"`
+	Parameters  ToolParameters `json:"parameters"`
+}
+
+type ToolParameters struct {
+	Type       string                 `json:"type"`
+	Required   []string               `json:"required"`
+	Properties map[string]any         `json:"properties"`
+}
+
+type CommonField struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+type FieldWithItems struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Items any `json:"items"`
 }
 
 // Tool 一个 function 工具。
@@ -77,7 +95,7 @@ type ChatRequest struct {
 	Tools       []Tool          `json:"tools,omitempty"`
 	Strict      bool            `json:"strict,omitempty"`
 	ToolChoice  *ToolChoice     `json:"tool_choice,omitempty"`
-	UserID      string          `json:"user_id,omitempty"`
+	// UserID      string          `json:"user_id,omitempty"`
 }
 
 // ---- 响应类型 ----
@@ -118,7 +136,11 @@ type RespData struct {
 	Usage   Usage    `json:"usage"`
 }
 
-func (cli *LLMClient) Send(userId string, messages []ChatMessage, tools []Tool, toolChoice *ToolChoice, resp *RespData) error {
+func (cli *LLMClient) Send(
+	ctx context.Context, 
+	messages []ChatMessage, tools []Tool, 
+	toolChoice *ToolChoice, resp *RespData) error {
+	
 	url := "https://api.deepseek.com/chat/completions"
 	method := "POST"
 
@@ -133,7 +155,6 @@ func (cli *LLMClient) Send(userId string, messages []ChatMessage, tools []Tool, 
 		Tools:       tools,
 		Strict:      true,
 		ToolChoice:  toolChoice,
-		UserID:      userId,
 	}
 
 	payloadBytes, err := json.Marshal(reqBody)
@@ -141,7 +162,7 @@ func (cli *LLMClient) Send(userId string, messages []ChatMessage, tools []Tool, 
 		return fmt.Errorf("构造 LLM 请求体失败: %w", err)
 	}
 
-	req, err := http.NewRequest(method, url, strings.NewReader(string(payloadBytes)))
+	req, err := http.NewRequestWithContext(ctx, method, url, strings.NewReader(string(payloadBytes)))
 	if err != nil {
 		return err
 	}
